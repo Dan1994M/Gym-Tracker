@@ -43,8 +43,8 @@
   }
   input:focus, select:focus { outline: none; border-color: var(--accent); }
   .pctwrap { display: flex; align-items: center; gap: 12px; }
-  input[type=range] { flex: 1; accent-color: var(--accent); padding: 0; }
-  .pctval { font-size: 24px; font-weight: 700; min-width: 64px; text-align: right; font-variant-numeric: tabular-nums; }
+  #pct { flex: 1; font-size: 24px; font-weight: 700; text-align: center; font-variant-numeric: tabular-nums; }
+  .pctval { font-size: 24px; font-weight: 700; color: var(--muted); }
   button {
     cursor: pointer; background: var(--accent); border: none; color: #fff; font-weight: 600;
     transition: filter .15s;
@@ -93,8 +93,8 @@
     <div class="field" style="margin-top:12px;">
       <label for="pct">Auslastung</label>
       <div class="pctwrap">
-        <input type="range" id="pct" min="0" max="100" step="5" value="50">
-        <span class="pctval" id="pctval">50%</span>
+        <input type="number" id="pct" min="0" max="100" step="1" value="50" inputmode="numeric" placeholder="0–100">
+        <span class="pctval">%</span>
       </div>
     </div>
     <div class="btnrow">
@@ -150,8 +150,6 @@ for (let h = 0; h < 24; h++) {
   hourSel.appendChild(o);
 }
 const pct = document.getElementById('pct');
-const pctval = document.getElementById('pctval');
-pct.oninput = () => pctval.textContent = pct.value + '%';
 
 function setNow() {
   const n = new Date();
@@ -164,8 +162,10 @@ document.getElementById('now').onclick = setNow;
 document.getElementById('save').onclick = () => {
   const date = document.getElementById('date').value;
   if (!date) { alert('Bitte Datum wählen.'); return; }
-  data.push({ date, hour: +hourSel.value, pct: +pct.value, ts: Date.now() });
-  save(); render();
+  const v = parseInt(pct.value, 10);
+  if (isNaN(v) || v < 0 || v > 100) { alert('Bitte eine Zahl zwischen 0 und 100 eingeben.'); return; }
+  data.push({ date, hour: +hourSel.value, pct: v, ts: Date.now() });
+  save(); pct.value = ''; render();
 };
 
 // --- Aggregation ---
