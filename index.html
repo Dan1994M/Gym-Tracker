@@ -153,7 +153,8 @@ const pct = document.getElementById('pct');
 
 function setNow() {
   const n = new Date();
-  document.getElementById('date').value = n.toISOString().slice(0,10);
+  const pad = x => String(x).padStart(2,'0');
+  document.getElementById('date').value = `${n.getFullYear()}-${pad(n.getMonth()+1)}-${pad(n.getDate())}`;
   hourSel.value = n.getHours();
 }
 setNow();
@@ -164,7 +165,10 @@ document.getElementById('save').onclick = () => {
   if (!date) { alert('Bitte Datum wählen.'); return; }
   const v = parseInt(pct.value, 10);
   if (isNaN(v) || v < 0 || v > 100) { alert('Bitte eine Zahl zwischen 0 und 100 eingeben.'); return; }
-  data.push({ date, hour: +hourSel.value, pct: v, ts: Date.now() });
+  const hour = +hourSel.value;
+  const dup = data.find(e => e.date === date && +e.hour === hour);
+  if (dup) { alert(`Für ${date} ${String(hour).padStart(2,'0')}:00 existiert bereits ein Eintrag (${dup.pct}%). Zum Ändern zuerst im Verlauf löschen.`); return; }
+  data.push({ date, hour, pct: v, ts: Date.now() });
   save(); pct.value = ''; render();
 };
 
