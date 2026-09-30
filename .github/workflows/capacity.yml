@@ -1,0 +1,74 @@
+name: Auslastung erfassen
+
+on:
+  schedule:
+    - cron: '7 * * * *'   # stündlich (UTC), GitHub startet oft einige Minuten später
+  workflow_dispatch:       # manueller Start zum Testen
+
+permissions:
+  contents: write
+
+concurrency:
+  group: capacity
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Auslastung abrufen und anhängen
+        run: |
+          python3 - <<'PY'
+          import json, urllib.request, time
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+
+          CENTER_ID = 290  # Langenfeld-Berghausen
+          URL = 'https://exerp.xtrafit.de/api/centers/capacity'
+
+          req = urllib.request.Request(URL, headers={'User-Agent': 'gym-tracker'})
+          with urllib.request.urlopen(req, timeout=30) as r:
+              centers = json.load(r)
+          c = next((x for x in centers if x.get('centerId') == CENTER_ID), None)
+          if c is None:
+              raise SystemExit('Studio nicht gefunden')
+
+          n = int(c.get('currentlyCheckedInCount') or 0)
+          mx = int(c.get('maximumAllowedCheckedIn') or 0)
+          if mx <= 0:
+              raise SystemExit('Keine Kapazität geliefert')
+          if n == 0:
+              print('0 Personen (vermutlich geschlossen) – nicht gespeichert')
+              raise SystemExit(0)
+
+          now = datetime.now(ZoneInfo('Europe/Berlin'))
+          entry = {
+              'date': now.strftime('%Y-%m-%d'),
+              'hour': now.hour,
+              'pct': min(100, round(n / mx * 100)),
+              'count': n,
+              'max': mx,
+              'ts': int(time.time() * 1000),
+          }
+
+          try:
+              data = json.load(open('data.json', encoding='utf-8'))
+          except Exception:
+              data = []
+          if any(e['date'] == entry['date'] and e['hour'] == entry['hour'] for e in data):
+              print('Slot bereits erfasst')
+              raise SystemExit(0)
+          data.append(entry)
+          json.dump(data, open('data.json', 'w', encoding='utf-8'), separators=(',', ':'))
+          print('Gespeichert:', entry)
+          PY
+
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898283+github-actions[bot]@users.noreply.github.com'
+          git add data.json
+          git diff --cached --quiet || git commit -m "Auslastung $(TZ=Europe/Berlin date '+%F %H:00')"
+          git push
