@@ -16,7 +16,7 @@ jobs:
   fetch:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Auslastung abrufen und anhängen
         run: |
@@ -28,12 +28,25 @@ jobs:
           CENTER_ID = 290  # Langenfeld-Berghausen
           URL = 'https://exerp.xtrafit.de/api/centers/capacity'
 
-          req = urllib.request.Request(URL, headers={'User-Agent': 'gym-tracker'})
-          with urllib.request.urlopen(req, timeout=30) as r:
-              centers = json.load(r)
-          c = next((x for x in centers if x.get('centerId') == CENTER_ID), None)
+          req = urllib.request.Request(URL, headers={
+              'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)',
+              'Accept': 'application/json'})
+          try:
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  raw = r.read().decode('utf-8', 'replace')
+          except Exception as ex:
+              raise SystemExit(f'Abruf fehlgeschlagen: {ex!r}')
+          print('Antwort (Anfang):', raw[:300])
+          try:
+              centers = json.loads(raw)
+          except Exception:
+              raise SystemExit('Antwort ist kein JSON')
+          if isinstance(centers, dict):
+              centers = next((v for v in centers.values() if isinstance(v, list)), [])
+          c = next((x for x in centers if str(x.get('centerId')) == str(CENTER_ID)), None)
           if c is None:
               raise SystemExit('Studio nicht gefunden')
+          print('Studio:', c)
 
           n = int(c.get('currentlyCheckedInCount') or 0)
           mx = int(c.get('maximumAllowedCheckedIn') or 0)
