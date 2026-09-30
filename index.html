@@ -71,12 +71,17 @@
   .legend { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); margin-top: 8px; }
   .legend .bar { flex: 1; height: 10px; border-radius: 4px; background: linear-gradient(90deg, #34d399, #fbbf24, #ef4444); }
   .muted { color: var(--muted); font-size: 12px; }
+  .ver { display:inline-block; margin-left:6px; padding:1px 8px; border-radius:10px; background:var(--panel2); border:1px solid var(--border); font-size:11px; font-variant-numeric:tabular-nums; }
+  .band-day { font-weight:700; min-width:28px; display:inline-block; }
+  .band-list { color:var(--text); }
+  .thr { display:flex; align-items:center; gap:8px; margin-bottom:12px; font-size:13px; color:var(--muted); }
+  .thr input { width:80px; text-align:center; }
   .count { color: var(--muted); font-size: 10px; display: block; }
 </style>
 </head>
 <body>
   <h1>🏋️ Gym-Auslastungs-Tracker</h1>
-  <div class="sub">Erfasse die Auslastung in %, um deine ruhigsten Trainingszeiten zu finden.</div>
+  <div class="sub">Erfasse die Auslastung in %, um deine ruhigsten Trainingszeiten zu finden. <span id="ver" class="ver">Version: –</span></div>
 
   <div class="card">
     <h2>Neuer Eintrag</h2>
@@ -104,7 +109,8 @@
   </div>
 
   <div class="card">
-    <h2>Beste Trainingszeiten</h2>
+    <h2>Ruhige Zeitbänder pro Tag</h2>
+    <div class="thr"><label for="thr">Ruhig bis</label><input type="number" id="thr" min="0" max="100" step="5" inputmode="numeric"><span>% Ø-Auslastung</span></div>
     <div class="best" id="best"><div class="empty-state">Noch keine Daten.</div></div>
   </div>
 
@@ -237,19 +243,39 @@ function renderHeatmap(grid) {
   document.getElementById('heatmap').innerHTML = html;
 }
 
+const THR_KEY = 'gymTracker_thr';
+const thrInput = document.getElementById('thr');
+thrInput.value = (() => { try { return localStorage.getItem(THR_KEY) || 40; } catch { return 40; } })();
+thrInput.oninput = () => { try { localStorage.setItem(THR_KEY, thrInput.value); } catch {} render(); };
+
+// Zusammenhängende Stunden mit Ø <= Schwelle je Wochentag zu Bändern zusammenfassen
 function renderBest(grid) {
-  const slots = [];
-  for (let d=0; d<7; d++) for (let h=0; h<24; h++) {
-    const c = grid[d][h];
-    if (c.n) slots.push({ d, h, avg: c.sum/c.n, n: c.n });
-  }
   const el = document.getElementById('best');
-  if (!slots.length) { el.innerHTML = '<div class="empty-state">Noch keine Daten.</div>'; return; }
-  slots.sort((a,b) => a.avg - b.avg);
-  el.innerHTML = slots.slice(0,5).map((s,i) =>
-    `<div class="best-item"><div><span class="rank">#${i+1}</span>${DAYS[s.d]} ${String(s.h).padStart(2,'0')}:00</div>`+
-    `<div class="val">Ø ${Math.round(s.avg)}% · ${s.n} Mess.</div></div>`
-  ).join('');
+  const thr = parseInt(thrInput.value, 10);
+  const limit = isNaN(thr) ? 40 : thr;
+  let anyData = false;
+  const rows = [];
+  for (let d = 0; d < 7; d++) {
+    const bands = []; let cur = null;
+    for (let h = 0; h <= 24; h++) {
+      const c = h < 24 ? grid[d][h] : null;
+      if (c && c.n) anyData = true;
+      const ok = c && c.n && (c.sum / c.n) <= limit;
+      if (ok) {
+        if (!cur) cur = { from: h, to: h, sum: 0, n: 0, hours: 0 };
+        cur.to = h; cur.sum += c.sum / c.n; cur.hours++; cur.n += c.n;
+      } else if (cur) { bands.push(cur); cur = null; }
+    }
+    rows.push({ d, bands });
+  }
+  if (!anyData) { el.innerHTML = '<div class="empty-state">Noch keine Daten.</div>'; return; }
+  const p = h => String(h).padStart(2, '0') + ':00';
+  el.innerHTML = rows.map(({ d, bands }) => {
+    const txt = bands.length
+      ? bands.map(b => `${p(b.from)}–${p(b.to + 1)} <span class="val">(Ø ${Math.round(b.sum / b.hours)}%, ${b.n} Mess.)</span>`).join('<br>')
+      : '<span class="val">keine ruhigen Zeiten</span>';
+    return `<div class="best-item" style="justify-content:flex-start;gap:12px;align-items:flex-start"><span class="band-day">${DAYS[d]}</span><div class="band-list">${txt}</div></div>`;
+  }).join('');
 }
 
 function renderLog() {
@@ -299,6 +325,18 @@ document.getElementById('importfile').onchange = (ev) => {
 
 render();
 loadAuto();
+
+// Version = Cache-Name aus sw.js (z. B. gym-tracker-v3)
+(async () => {
+  try {
+    if (!('caches' in window)) return;
+    const keys = (await caches.keys()).filter(k => k.startsWith('gym-tracker'));
+    if (!keys.length) return;
+    const num = k => parseInt((k.match(/(\d+)$/) || [0, 0])[1], 10);
+    keys.sort((a, b) => num(b) - num(a));
+    document.getElementById('ver').textContent = 'Version: ' + keys[0].replace('gym-tracker-', '');
+  } catch {}
+})();
 </script>
 <script>
 if ('serviceWorker' in navigator) {
