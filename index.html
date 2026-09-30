@@ -136,6 +136,24 @@ function load() {
 }
 function save() { localStorage.setItem(KEY, JSON.stringify(data)); }
 
+// --- Automatische Messungen (GitHub Actions -> data.json) ---
+const AUTO_KEY = 'gymTracker_auto';
+let auto = [];
+try { auto = JSON.parse(localStorage.getItem(AUTO_KEY)) || []; } catch { auto = []; }
+function allEntries() { return data.concat(auto); }
+async function loadAuto() {
+  try {
+    const res = await fetch('data.json?t=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) return;
+    const j = await res.json();
+    if (Array.isArray(j)) {
+      auto = j.map(e => ({ ...e, auto: true }));
+      try { localStorage.setItem(AUTO_KEY, JSON.stringify(auto)); } catch {}
+      render();
+    }
+  } catch { /* offline: letzter Stand aus localStorage */ }
+}
+
 // ISO weekday: 0=Mo ... 6=So
 function isoDow(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
@@ -166,7 +184,7 @@ document.getElementById('save').onclick = () => {
   const v = parseInt(pct.value, 10);
   if (isNaN(v) || v < 0 || v > 100) { alert('Bitte eine Zahl zwischen 0 und 100 eingeben.'); return; }
   const hour = +hourSel.value;
-  const dup = data.find(e => e.date === date && +e.hour === hour);
+  const dup = allEntries().find(e => e.date === date && +e.hour === hour);
   if (dup) { alert(`Für ${date} ${String(hour).padStart(2,'0')}:00 existiert bereits ein Eintrag (${dup.pct}%). Zum Ändern zuerst im Verlauf löschen.`); return; }
   data.push({ date, hour, pct: v, ts: Date.now() });
   save(); pct.value = ''; render();
@@ -176,7 +194,7 @@ document.getElementById('save').onclick = () => {
 function buildGrid() {
   // grid[dow][hour] = {sum, n}
   const grid = Array.from({length:7}, () => Array.from({length:24}, () => ({sum:0, n:0})));
-  for (const e of data) {
+  for (const e of allEntries()) {
     const dow = isoDow(e.date);
     const c = grid[dow][e.hour];
     c.sum += e.pct; c.n++;
@@ -236,13 +254,14 @@ function renderBest(grid) {
 
 function renderLog() {
   const el = document.getElementById('log');
-  if (!data.length) { el.innerHTML = '<div class="empty-state">Noch keine Einträge.</div>'; return; }
-  const sorted = [...data].map((e,i)=>({e,i})).sort((a,b)=>b.e.ts-a.e.ts).slice(0,30);
+  const all = data.map((e,i)=>({e,i})).concat(auto.map(e=>({e,i:-1})));
+  if (!all.length) { el.innerHTML = '<div class="empty-state">Noch keine Einträge.</div>'; return; }
+  const sorted = all.sort((a,b)=>b.e.ts-a.e.ts).slice(0,30);
   el.innerHTML = sorted.map(({e,i}) => {
     const dow = DAYS[isoDow(e.date)];
     return `<div class="log-item"><div>${e.date} (${dow}) · ${String(e.hour).padStart(2,'0')}:00`+
-      `<span class="log-meta"> — ${e.pct}%</span></div>`+
-      `<button class="del" data-i="${i}">✕</button></div>`;
+      `<span class="log-meta"> — ${e.pct}%${e.auto ? ' · auto' : ''}</span></div>`+
+      (i >= 0 ? `<button class="del" data-i="${i}">✕</button>` : '') + `</div>`;
   }).join('');
   el.querySelectorAll('.del').forEach(b => b.onclick = () => {
     data.splice(+b.dataset.i, 1); save(); render();
@@ -279,6 +298,7 @@ document.getElementById('importfile').onchange = (ev) => {
 };
 
 render();
+loadAuto();
 </script>
 <script>
 if ('serviceWorker' in navigator) {
