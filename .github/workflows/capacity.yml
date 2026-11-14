@@ -21,38 +21,36 @@ jobs:
       - name: Auslastung abrufen und anhängen
         run: |
           python3 - <<'PY'
-          import json, urllib.request, time
+          import json, re, urllib.request, time
           from datetime import datetime
           from zoneinfo import ZoneInfo
 
-          CENTER_ID = 290  # Langenfeld-Berghausen
-          URL = 'https://exerp.xtrafit.de/api/centers/capacity'
+          # Alte Exerp-API (centerId 290) liefert seit 13.11.2026 HTTP 401.
+          # myFitApp-Anzeige, Langenfeld-Berghausen = 160181
+          URL = 'https://api.myfitapp.de/metric/display/160181'
 
           req = urllib.request.Request(URL, headers={
-              'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)',
-              'Accept': 'application/json'})
+              'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)'})
           try:
               with urllib.request.urlopen(req, timeout=30) as r:
                   raw = r.read().decode('utf-8', 'replace')
           except Exception as ex:
               raise SystemExit(f'Abruf fehlgeschlagen: {ex!r}')
-          print('Antwort (Anfang):', raw[:300])
-          try:
-              centers = json.loads(raw)
-          except Exception:
-              raise SystemExit('Antwort ist kein JSON')
-          if isinstance(centers, dict):
-              centers = next((v for v in centers.values() if isinstance(v, list)), [])
-          c = next((x for x in centers if str(x.get('centerId')) == str(CENTER_ID)), None)
-          if c is None:
-              raise SystemExit('Studio nicht gefunden')
-          print('Studio:', c)
 
-          n = int(c.get('currentlyCheckedInCount') or 0)
-          mx = int(c.get('maximumAllowedCheckedIn') or 0)
-          if mx <= 0:
-              raise SystemExit('Keine Kapazität geliefert')
-          if n == 0:
+          def attr(name):
+              m = re.search(name + r'="(\d+)"', raw)
+              return int(m.group(1)) if m else None
+
+          n = attr('data-display-val')
+          mx = attr('data-max')
+          pct = attr('data-display-percentage')
+          print('Werte:', {'count': n, 'max': mx, 'pct': pct})
+          if pct is None and (n is None or not mx):
+              print('Antwort (Anfang):', raw[:500])
+              raise SystemExit('Keine Auslastungswerte in der Antwort')
+          if pct is None:
+              pct = round(n / mx * 100)
+          if (n == 0) or (n is None and pct == 0):
               print('0 Personen (vermutlich geschlossen) – nicht gespeichert')
               raise SystemExit(0)
 
@@ -60,7 +58,7 @@ jobs:
           entry = {
               'date': now.strftime('%Y-%m-%d'),
               'hour': now.hour,
-              'pct': min(100, round(n / mx * 100)),
+              'pct': min(100, pct),
               'count': n,
               'max': mx,
               'ts': int(time.time() * 1000),
