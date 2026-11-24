@@ -143,15 +143,15 @@
 
     <div class="card">
       <h2>Ruhige Zeitbänder pro Tag</h2>
-      <div class="thr"><label for="thr">Ruhig bis</label><input type="number" id="thr" min="0" max="100" step="5" inputmode="numeric"><span>% Ø-Auslastung</span></div>
+      <div class="thr"><label for="thr">Ruhig bis</label><input type="number" id="thr" min="0" max="100" step="5" inputmode="numeric"><span>% <span class="agglbl">Ø</span>-Auslastung</span></div>
       <div class="best" id="best"><div class="empty-state">Noch keine Daten.</div></div>
     </div>
 
     <div class="card">
-      <h2>Heatmap (Ø Auslastung)</h2>
+      <h2>Heatmap (<span class="agglbl">Ø</span> Auslastung)</h2>
       <div class="scroll"><div id="heatmap"></div></div>
       <div class="legend"><span>leer</span><div class="bar"></div><span>voll</span></div>
-      <div class="muted" style="margin-top:6px;">Zahl = Ø %, kleine Zahl = Anzahl Messungen. Umrandet = jetzt.</div>
+      <div class="muted" style="margin-top:6px;">Zahl = <span class="agglbl">Ø</span> %, kleine Zahl = Anzahl Messungen. Umrandet = jetzt.</div>
     </div>
   </section>
 
@@ -201,10 +201,24 @@
     </div>
   </section>
 
+  <!-- Tab: Einstellungen -->
+  <section class="tab" id="tab-settings">
+    <div class="card">
+      <h2>Auswertung</h2>
+      <label style="display:block;margin-bottom:6px">Berechnung pro Wochentag &amp; Stunde</label>
+      <div class="seg" id="aggmode">
+        <button data-m="mean">Mittelwert</button>
+        <button data-m="median">Median</button>
+      </div>
+      <div class="muted">Mittelwert: Durchschnitt aller Messungen, reagiert auf Ausreißer (Feiertage, Events).<br>Median: mittlerer Wert der sortierten Messungen, zeigt den typischen Tag und ist robust gegen Ausreißer.</div>
+    </div>
+  </section>
+
   <nav class="tabbar" id="tabbar">
     <button data-tab="overview" class="on"><span class="ic">📊</span>Übersicht</button>
     <button data-tab="entry"><span class="ic">➕</span>Eingabe</button>
     <button data-tab="log"><span class="ic">🕘</span>Verlauf</button>
+    <button data-tab="settings"><span class="ic">⚙️</span>Einstellungen</button>
   </nav>
 
   <div class="toast" id="toast"><span id="toastmsg"></span><button id="toastbtn" style="display:none"></button></div>
@@ -314,12 +328,23 @@ $('save').onclick = () => {
 };
 
 // --- Aggregation ---
+const AGG_KEY = 'gymTracker_agg';
+let aggMode = (() => { try { return localStorage.getItem(AGG_KEY) || 'mean'; } catch { return 'mean'; } })();
+function aggregate(vals) {
+  if (aggMode === 'median') {
+    const s = vals.slice().sort((a, b) => a - b), m = s.length >> 1;
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  }
+  return vals.reduce((a, b) => a + b, 0) / vals.length;
+}
+function aggLabel() { return aggMode === 'median' ? 'Median' : 'Ø'; }
 function buildGrid() {
-  const grid = Array.from({length:7}, () => Array.from({length:24}, () => ({sum:0, n:0})));
+  const grid = Array.from({length:7}, () => Array.from({length:24}, () => ({vals:[], n:0, v:0})));
   for (const e of allEntries()) {
     const c = grid[isoDow(e.date)][e.hour];
-    c.sum += e.pct; c.n++;
+    c.vals.push(e.pct); c.n++;
   }
+  for (const day of grid) for (const c of day) if (c.n) c.v = aggregate(c.vals);
   return grid;
 }
 
@@ -344,15 +369,15 @@ function renderNow(grid) {
     el.innerHTML = `<div class="now-badge none">–</div><div class="now-text"><b>${DAYS[d]} ${pad(h)}:00</b><span>Für diese Stunde noch keine Messungen.</span></div>`;
     return;
   }
-  const avg = Math.round(c.sum / c.n);
+  const avg = Math.round(c.v);
   const verdict = avg <= limit ? 'Gute Zeit zum Trainieren' : avg <= limit + 20 ? 'Mittel voll' : 'Typischerweise voll';
   let trend = '';
   if (nx.n) {
-    const na = Math.round(nx.sum / nx.n);
-    trend = ` · ${pad((h+1)%24)}:00: Ø ${na} %` + (na < avg ? ' ↓' : na > avg ? ' ↑' : '');
+    const na = Math.round(nx.v);
+    trend = ` · ${pad((h+1)%24)}:00: ${aggLabel()} ${na} %` + (na < avg ? ' ↓' : na > avg ? ' ↑' : '');
   }
   el.innerHTML = `<div class="now-badge" style="background:${color(avg)}">${avg}%</div>`+
-    `<div class="now-text"><b>${verdict}</b><span>Ø ${DAYS[d]} ${pad(h)}:00 aus ${c.n} Messungen${trend}</span></div>`;
+    `<div class="now-text"><b>${verdict}</b><span>${aggLabel()} ${DAYS[d]} ${pad(h)}:00 aus ${c.n} Messungen${trend}</span></div>`;
 }
 
 function renderHeatmap(grid) {
@@ -369,7 +394,7 @@ function renderHeatmap(grid) {
       const c = grid[d][h];
       const isNow = d === now.d && h === now.h ? ' now' : '';
       if (c.n) {
-        const avg = Math.round(c.sum/c.n);
+        const avg = Math.round(c.v);
         html += `<td><div class="hcell${isNow}" style="background:${color(avg)}">${avg}<span class="count">${c.n}×</span></div></td>`;
       } else {
         html += `<td><div class="hcell empty${isNow}">–</div></td>`;
@@ -398,10 +423,10 @@ function renderBest(grid) {
     for (let h = 0; h <= 24; h++) {
       const c = h < 24 ? grid[d][h] : null;
       if (c && c.n) anyData = true;
-      const ok = c && c.n && (c.sum / c.n) <= limit;
+      const ok = c && c.n && c.v <= limit;
       if (ok) {
         if (!cur) cur = { from: h, to: h, sum: 0, n: 0, hours: 0 };
-        cur.to = h; cur.sum += c.sum / c.n; cur.hours++; cur.n += c.n;
+        cur.to = h; cur.sum += c.v; cur.hours++; cur.n += c.n;
       } else if (cur) { bands.push(cur); cur = null; }
     }
     rows.push({ d, bands });
@@ -413,7 +438,7 @@ function renderBest(grid) {
   const ordered = rows.slice(today).concat(rows.slice(0, today));
   el.innerHTML = ordered.map(({ d, bands }) => {
     const txt = bands.length
-      ? bands.map(b => `${p(b.from)}–${p(b.to + 1)} <span class="val">(Ø ${Math.round(b.sum / b.hours)} %, ${b.n} Mess.)</span>`).join('<br>')
+      ? bands.map(b => `${p(b.from)}–${p(b.to + 1)} <span class="val">(${aggLabel()} ${Math.round(b.sum / b.hours)} %, ${b.n} Mess.)</span>`).join('<br>')
       : '<span class="val">keine ruhigen Zeiten</span>';
     return `<div class="best-item${d === today ? ' today' : ''}"><span class="band-day">${DAYS[d]}</span><div>${txt}</div></div>`;
   }).join('');
@@ -454,7 +479,17 @@ function renderLog() {
   });
 }
 
+function syncAggUI() {
+  document.querySelectorAll('#aggmode button').forEach(b => b.classList.toggle('on', b.dataset.m === aggMode));
+  document.querySelectorAll('.agglbl').forEach(s => s.textContent = aggLabel());
+}
+document.querySelectorAll('#aggmode button').forEach(b => b.onclick = () => {
+  aggMode = b.dataset.m; try { localStorage.setItem(AGG_KEY, aggMode); } catch {}
+  render();
+});
+
 function render() {
+  syncAggUI();
   const grid = buildGrid();
   renderNow(grid);
   renderBest(grid);
